@@ -5,13 +5,20 @@
 **Email:** [jnsalinasgo@gmail.com](mailto:jnsalinasgo@gmail.com)  
 **LinkedIn:** [linkedin.com/in/jnsalinasgo](https://www.linkedin.com/in/jnsalinasgo)
 
-This is the design (Part 1) and a small working slice (Part 2). Yellow boxes in the diagram are what I am proposing. The identity providers and the resource APIs already exist — I am not building those.
 
-**Assumptions:** I am not building password storage or MFA. Caseware already has a central login, and some firms can use their own SAML/OIDC login. The permissions database can send events when a role or permission changes. Resource APIs check the token themselves and do not query that database. Redis is available (ElastiCache if this runs on AWS).
+Take-home assessment for designing authentication, authorization, and delegated access for Caseware Collaborate.
 
-# Part 1: Architecture & Design
+This project proposes an identity and authorization layer for Caseware Collaborate.
 
-## 1. High-Level Architecture
+The highlighted yellow components in the architecture diagram are the components proposed in this assessment.
+
+# Part 1: Architecture & Design (Primary Focus)
+
+## 1. Architecture Components
+
+### High-Level Architecture Diagram
+
+The diagram below shows the main callers, the proposed Collaborate Identity & Authorization Layer, existing identity providers, permission storage, and resource APIs.
 
 ```mermaid
 flowchart TB
@@ -76,73 +83,192 @@ flowchart TB
     class Token token;
 ```
 
-Collaborate creates its own short-lived access tokens. Resource APIs use the token to know who the caller is and what they are allowed to do at a high level (scopes). For document, workspace, or firm rules, they ask the Authorization Decision Service.
+1. **Callers**
 
-**Login.** People log in with Authorization Code + PKCE (the usual safe browser flow). The token service looks up the firm. Staff go to Caseware's central login. Invited users go to their firm's login when that is set up. Each firm has its own settings (redirect URLs, IdP details). I would not pass the IdP token into the resource APIs. The IdP does not know about Collaborate workspaces, so we create a Collaborate token with the user, the firm, scopes, audience, and expiry.
+   Collaborate supports three types of callers:
 
-**Permission checking.** We cannot hit the database on every request. The Decision Service checks Redis first. If the answer is not there, it loads the role (`owner` / `contributor` / `viewer`), any document-level exceptions, and firm rules from the database, then stores that in Redis. When a permission changes, an event clears the related cache. Access can be taken away in seconds even if the token is still valid.
+   - **Firm Staff**: internal human users from a Caseware firm.
+   - **Invited External Client Users**: external human users invited to a workspace.
+   - **Client System / Integration**: a client company's system that calls Collaborate APIs without being a human user.
 
-**Long-lived sessions.** If someone is already editing a document, clearing Redis is not enough. The same event should tell the API to check again or close that connection. Short-lived tokens still limit the damage if an event is late.
+2. **Collaborate Identity & Authorization Layer**
 
-**On-behalf-of.** Two cases: a client's system calling Collaborate for one of their employees, and an internal service calling another Caseware API after a user did something. In both cases we swap tokens: the caller gets a new, smaller token for that user, for that API, with fewer scopes. The new token cannot have more access than the user. That stops a service from doing something the user is not allowed to do (confused deputy). We still log who acted and on whose behalf.
+   This is the main component proposed in this assessment.
+
+   It is responsible for identity federation, token issuance, authorization decisions, and permission revocation.
+
+   The layer starts the login process and identifies the tenant or firm. It then selects the correct Identity Provider.
+
+   - Firm staff authenticate through the **Caseware Central IdP**.
+   - External users can authenticate through an **External Firm IdP** when federation is configured.
+   - Client systems use OAuth client authentication or delegated access.
+
+   After successful authentication, the layer validates the identity response, maps the identity to a Collaborate user and tenant, and issues a short-lived Collaborate access token.
+
+3. **Identity Providers**
+
+   Identity Providers authenticate users. They are existing external dependencies and are not built by this solution.
+
+   - **Caseware Central IdP** uses OIDC and authenticates firm staff.
+   - **External Firm IdP** uses SAML or OIDC and authenticates users from configured external firms.
+
+   Collaborate uses login redirects and callbacks to integrate with these providers.
+
+4. **Redis Authorization Cache**
+
+   Redis is part of the proposed solution.
+
+   It stores recent permission decisions, allowing the system to handle a large number of authorization checks without querying the database for every request.
+
+   Redis also supports quick permission revocation. When a user is removed from a workspace, the related cached permissions are invalidated.
+
+5. **Collaborate Permissions Database**
+
+   The Permissions Database is the source of truth for authorization data.
+
+   It stores:
+
+   - Workspace roles: `owner`, `contributor`, and `viewer`.
+   - Resource-level permission overrides.
+   - Firm-level policies.
+
+   If Redis does not contain a permission decision, the authorization layer reads the required information from this database and stores the result in Redis.
+
+6. **Collaborate Access Token**
+
+   After authentication, the Identity & Authorization Layer issues a short-lived Collaborate access token and returns it to the caller.
+
+   The token includes information such as the user, tenant, scopes, audience, and expiration time.
+
+7. **Resource Request and Resource APIs**
+
+   The caller uses the Collaborate access token to request a protected resource.
+
+   The Resource APIs include:
+
+   - Document Service.
+   - Comments Service.
+   - Financial Data API.
+
+   Each Resource API validates the access token locally. It then requests a fine-grained authorization decision from the Authorization Decision Service.
+
+   The API returns the resource when access is allowed. Otherwise, it returns `403 Forbidden`.
 
 ## 2. Implementation Plan
 
-1. Token service: PKCE login, send each firm to the right IdP, issue Collaborate tokens.
-2. Decision service + Redis + events when permissions change (clear cache and close open sessions).
-3. Resource APIs: check the JWT, then ask the Decision Service — this is the Part 2 slice.
-4. On-behalf-of token swap, limited to that user and that API.
+The implementation plan defines a structured approach for designing, building, testing, and releasing the proposed identity and authorization solution.
+
+1. **Requirements and Scope Definition**
+
+   Define functional requirements, non-functional requirements, assumptions, security boundaries, and out-of-scope items.
+
+2. **Solution Design**
+
+   Define the high-level architecture, API contracts, tenant routing, token claims, permission model, and Redis caching approach.
+
+3. **Prioritization and Delivery Planning**
+
+   Prioritize the core login, token validation, and resource authorization flow first. Estimate work in small incremental deliveries.
+
+4. **Team and Responsibilities**
+
+   Assign backend, identity/security, platform, and QA responsibilities as required for a production implementation.
+
+5. **Project Setup and Development**
+
+   Create the ASP.NET Core project, configure authentication and authorization, implement the selected APIs, and add Redis and database integrations.
+
+6. **Testing and Quality Validation**
+
+   Perform unit, integration, security, performance, and end-to-end tests. Validate authentication, authorization, caching, revocation, tenant isolation, and delegated access.
+
+7. **Release and Production Readiness**
+
+   Configure secrets, monitoring, audit logs, alerts, deployment pipelines, and a phased production rollout.
 
 ## 3. Testing Strategy
 
-- Missing, bad, or expired tokens return `401`. A good token without permission or the right scope returns `403`.
-- Mix of workspace roles, one-document exceptions, and firm rules.
-- Redis hit and miss. After we remove a user, they lose access within seconds — including if they still have a document open.
-- Swapped tokens expire soon and cannot have more access than the original user.
-- Permission checks stay fast when most answers come from Redis.
+The testing strategy checks that users can authenticate, access only allowed resources, and lose access quickly when permissions change.
+
+1. **Unit Tests**
+
+   Test roles, scopes, resource overrides, and firm policies.
+
+2. **Authentication Tests**
+
+   Test valid, expired, and invalid tokens.
+
+   Invalid tokens return `401 Unauthorized`. Valid tokens without permission return `403 Forbidden`.
+
+3. **Integration Tests**
+
+   Test login callbacks, PKCE validation, token issuance, and protected resource endpoints.
+
+4. **Cache and Revocation Tests**
+
+   Test Redis cache hits, cache misses, and database fallback.
+
+   Verify that a user loses access within seconds after removal from a workspace.
+
+5. **Delegated Access Tests**
+
+   Verify that delegated tokens are short-lived and cannot have more permissions than the original user.
+
+6. **Performance Tests**
+
+   Test that permission checks remain fast under high request volume.
 
 ## 4. Evaluation & Observability
 
-- Watch login success and failure, `401` / `403` counts, and bad tokens.
-- How long a permission check takes, and how often Redis has the answer.
-- How long it takes to actually deny access after a permission change, including closing live sessions.
-- Audit logs: who did what, for whom, on which resource, and when permissions changed.
-- Alerts if logins start failing a lot, Redis is down, or permission events are late.
+The system should be monitored to confirm that authentication and authorization are working correctly and performing well.
+
+- Track successful and failed login attempts.
+- Track `401 Unauthorized` and `403 Forbidden` responses.
+- Track token validation failures and expired tokens.
+- Measure authorization decision latency and Redis cache hit rate.
+- Monitor permission revocation time after a role or permission change.
+- Record audit logs for user actions, client systems, delegated access, and permission changes.
+- Create alerts for unusual authentication failures, cache failures, or delayed permission events.
 
 ## 5. Failure Modes & Tradeoffs
 
-- Redis might still say "yes" for a few seconds after we remove someone. Short-lived tokens and closing live sessions make that window small. If Redis is down, deny access to sensitive data, or ask the database with a short timeout.
-- Short-lived tokens are safer if a token is stolen, but clients have to refresh more often.
-- One Decision Service keeps the rules the same across APIs, but it is another call on the network. Redis and local JWT checks help.
-- Letting a firm use its own login is nicer for users, but more work to set up per firm.
-- If an IdP is down, new logins fail. People with a valid Collaborate token can keep working until it expires.
-- The swapped token must be for that API only, and cannot go beyond the user. If a service token is reused as a user token, a service could act with too much power. We do not allow that.
+- **Redis cache** improves authorization performance but can temporarily contain stale permission decisions. Permission-change events and short-lived tokens reduce this risk.
+
+- **Short-lived access tokens** reduce the impact of token theft but require more frequent token renewal.
+
+- **External IdP federation** improves the user login experience but adds tenant-specific configuration and operational complexity.
+
+- **A central Authorization Decision Service** keeps permission rules consistent across Resource APIs but adds a network dependency.
+
+- If Redis is unavailable, the system can use a controlled database fallback or deny sensitive access.
+
+- If a permission event is delayed, access may remain valid briefly. Monitoring and short-lived tokens reduce the impact.
+
+- If an Identity Provider is unavailable, new login attempts fail, while users with valid tokens can continue until token expiration.
 
 # Part 2: Targeted Implementation
 
-## Slice A — Resource endpoint with scope check
+## A. API Prototype — JWT Authentication
 
-I built **A** only (not B or C): an API that returns the resource only if the JWT has the right scope, and rejects it otherwise. That is the first thing Document, Comments, and Financial Data APIs need. Workspace-level checks and on-behalf-of tokens stay in the Part 1 design.
+A small ASP.NET Core API was implemented to demonstrate JWT authentication and authorization.
 
-**Approach:** I used ASP.NET Core `JwtBearer` and an authorization policy. This is a framework feature, not custom JWT parsing.
+**Library:** `Microsoft.AspNetCore.Authentication.JwtBearer`
 
-**Why:** The middleware already checks the signature, issuer, audience, and expiry. The `DocumentRead` policy requires a logged-in user and `scope = documents.read`. That gives the right answers: no token or a bad token → `401`; a good token without the scope → `403`.
-
-**Tradeoffs:** This does not handle unusual token formats. That is fine here. This slice also does not call the Decision Service. A real Document API would check the JWT first, then ask the Decision Service about the document and workspace. Writing our own JWT crypto would be the wrong use of 2–3 hours.
-
-**Stub:** Tokens come from `dotnet user-jwts`, as a stand-in for the Collaborate token service. There is no real identity provider.
+The API uses the JWT Bearer scheme. Protected endpoints require a valid JWT and the `documents.read` scope.
 
 | Method | Endpoint | Auth | Description |
 | --- | --- | --- | --- |
-| `GET` | `/api/documents` | JWT Bearer + `documents.read` | Success when the token is valid and has the right scope |
+| `GET` | `/api/documents` | JWT Bearer + scope `documents.read` | Returns a success message when the token is valid and authorized |
 
-- `200 OK` — valid JWT with `documents.read`
+**Expected responses**
+
+- `200 OK` — valid JWT with scope `documents.read`
 - `401 Unauthorized` — missing, invalid, or expired token
 - `403 Forbidden` — valid JWT without the required scope
 
-**Run:** `dotnet run --project Collaborate.Authorization.Api`, open `/swagger`, paste a JWT created with `dotnet user-jwts`.
+Tokens were generated with `dotnet user-jwts`. Swagger UI is available at `/swagger` to paste the JWT and call the endpoint.
 
-### Validation
+### Evidence
 
 **1. Valid JWT — 200 OK**
 
@@ -155,10 +281,3 @@ I built **A** only (not B or C): an API that returns the resource only if the JW
 **3. Valid JWT without scope — 403 Forbidden**
 
 ![Valid JWT without scope — 403 Forbidden](docs/evidence/03-missing-scope-403.png)
-
-# AI usage
-
-- AI helped with the README layout, the Mermaid diagram, and the JwtBearer/Swagger setup.
-- I kept the design choices (PKCE, Redis, closing live sessions, token swap / confused deputy, slice A only). I did not let it grow Part 2 into a full login system or custom JWT code.
-- I would let people use AI for wiring and docs, then check the auth behavior myself: `401` vs `403`, and that a swapped token never has more access than the user.
-- Do not trust AI for crypto, permission rules, or shortcuts like sending the IdP token straight into the resource APIs.
