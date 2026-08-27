@@ -8,6 +8,73 @@ The highlighted yellow components in the architecture diagram are the components
 
 ## 1. Architecture Components
 
+### High-Level Architecture Diagram
+
+The diagram below shows the main callers, the proposed Collaborate Identity & Authorization Layer, existing identity providers, permission storage, and resource APIs.
+
+```mermaid
+flowchart TB
+    subgraph Callers["Callers"]
+        direction LR
+        Staff[Firm Staff<br/>Human User]
+        External[Invited External Client User<br/>Human User]
+        System[Client System / Integration<br/>Machine Client]
+    end
+
+    subgraph Designed["Proposed Collaborate Identity & Authorization Layer"]
+        direction LR
+        Identity[Identity Federation & Token Service<br/>OAuth 2.0 / OIDC]
+        Decision[Authorization Decision Service<br/>Fine-grained permission checks]
+        Redis[Redis Authorization Cache<br/>Fast decisions and revocation]
+
+        Identity --> Decision
+        Decision <--> Redis
+    end
+
+    Token[/Collaborate Access Token/]
+
+    APIs[Resource APIs<br/>Document Service / Comments Service / Financial Data API]
+
+    DB[(Collaborate Permissions Database<br/>Workspace roles: owner / contributor / viewer<br/>Resource overrides and firm policy)]
+
+    subgraph Providers["Identity Providers - Existing External Dependencies"]
+        direction LR
+        CasewareIdP[Caseware Central IdP<br/>OIDC]
+        ExternalIdP[External Firm IdP - optional<br/>SAML / OIDC]
+    end
+
+    Staff -->|Start interactive login| Identity
+    External -->|Start interactive login| Identity
+    System -->|OAuth client authentication<br/>or delegated access| Identity
+
+    Identity -->|Issue| Token
+
+    Staff -->|Request resource + access token| APIs
+    External -->|Request resource + access token| APIs
+    System -->|Request resource + access token| APIs
+
+    APIs -->|Validate token locally| APIs
+    APIs -->|Request fine-grained<br/>authorization decision| Decision
+
+    Redis -. Cache miss .-> DB
+    DB -->|Permission or role change event| Decision
+
+    Identity <-->|Login redirect + callback| CasewareIdP
+    Identity <-->|Login redirect + callback<br/>when federation is configured| ExternalIdP
+
+    classDef designed fill:#FFE28A,stroke:#A66E00,stroke-width:3px,color:#222;
+    classDef external fill:#E5E7EB,stroke:#6B7280,color:#222;
+    classDef data fill:#DDEBFF,stroke:#2563EB,color:#222;
+    classDef api fill:#DDF5E7,stroke:#15803D,color:#222;
+    classDef token fill:#F5E8FF,stroke:#9333EA,color:#222;
+
+    class Identity,Decision,Redis designed;
+    class Staff,External,System,CasewareIdP,ExternalIdP external;
+    class DB data;
+    class APIs api;
+    class Token token;
+```
+
 1. **Callers**
 
    Collaborate supports three types of callers:
@@ -78,73 +145,6 @@ The highlighted yellow components in the architecture diagram are the components
    Each Resource API validates the access token locally. It then requests a fine-grained authorization decision from the Authorization Decision Service.
 
    The API returns the resource when access is allowed. Otherwise, it returns `403 Forbidden`.
-
-### High-Level Architecture Diagram
-
-The diagram below shows the main callers, the proposed Collaborate Identity & Authorization Layer, existing identity providers, permission storage, and resource APIs.
-
-```mermaid
-flowchart TB
-    subgraph Callers["Callers"]
-        direction LR
-        Staff[Firm Staff<br/>Human User]
-        External[Invited External Client User<br/>Human User]
-        System[Client System / Integration<br/>Machine Client]
-    end
-
-    subgraph Designed["Proposed Collaborate Identity & Authorization Layer"]
-        direction LR
-        Identity[Identity Federation & Token Service<br/>OAuth 2.0 / OIDC]
-        Decision[Authorization Decision Service<br/>Fine-grained permission checks]
-        Redis[Redis Authorization Cache<br/>Fast decisions and revocation]
-
-        Identity --> Decision
-        Decision <--> Redis
-    end
-
-    Token[/Collaborate Access Token/]
-
-    APIs[Resource APIs<br/>Document Service / Comments Service / Financial Data API]
-
-    DB[(Collaborate Permissions Database<br/>Workspace roles: owner / contributor / viewer<br/>Resource overrides and firm policy)]
-
-    subgraph Providers["Identity Providers - Existing External Dependencies"]
-        direction LR
-        CasewareIdP[Caseware Central IdP<br/>OIDC]
-        ExternalIdP[External Firm IdP - optional<br/>SAML / OIDC]
-    end
-
-    Staff -->|Start interactive login| Identity
-    External -->|Start interactive login| Identity
-    System -->|OAuth client authentication<br/>or delegated access| Identity
-
-    Identity -->|Issue| Token
-
-    Staff -->|Request resource + access token| APIs
-    External -->|Request resource + access token| APIs
-    System -->|Request resource + access token| APIs
-
-    APIs -->|Validate token locally| APIs
-    APIs -->|Request fine-grained<br/>authorization decision| Decision
-
-    Redis -. Cache miss .-> DB
-    DB -->|Permission or role change event| Decision
-
-    Identity <-->|Login redirect + callback| CasewareIdP
-    Identity <-->|Login redirect + callback<br/>when federation is configured| ExternalIdP
-
-    classDef designed fill:#FFE28A,stroke:#A66E00,stroke-width:3px,color:#222;
-    classDef external fill:#E5E7EB,stroke:#6B7280,color:#222;
-    classDef data fill:#DDEBFF,stroke:#2563EB,color:#222;
-    classDef api fill:#DDF5E7,stroke:#15803D,color:#222;
-    classDef token fill:#F5E8FF,stroke:#9333EA,color:#222;
-
-    class Identity,Decision,Redis designed;
-    class Staff,External,System,CasewareIdP,ExternalIdP external;
-    class DB data;
-    class APIs api;
-    class Token token;
-```
 
 ## 2. Implementation Plan
 
