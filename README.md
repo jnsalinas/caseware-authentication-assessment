@@ -1,10 +1,18 @@
 # Caseware Collaborate Authentication & Authorization Assessment
 
+**Created by:** Nicolás Salinas  
+**GitHub:** [jnsalinas](https://github.com/jnsalinas)  
+**Email:** [jnsalinasgo@gmail.com](mailto:jnsalinasgo@gmail.com)  
+**LinkedIn:** [linkedin.com/in/jnsalinasgo](https://www.linkedin.com/in/jnsalinasgo)
+
+
 Take-home assessment for designing authentication, authorization, and delegated access for Caseware Collaborate.
 
 This project proposes an identity and authorization layer for Caseware Collaborate.
 
 The highlighted yellow components in the architecture diagram are the components proposed in this assessment.
+
+# Part 1: Architecture & Design (Primary Focus)
 
 ## 1. Architecture Components
 
@@ -237,3 +245,40 @@ The system should be monitored to confirm that authentication and authorization 
 - If a permission event is delayed, access may remain valid briefly. Monitoring and short-lived tokens reduce the impact.
 
 - If an Identity Provider is unavailable, new login attempts fail, while users with valid tokens can continue until token expiration.
+
+# Part 2: Targeted Implementation
+
+## A. API Prototype — JWT Authentication
+
+A small ASP.NET Core API was implemented to demonstrate JWT authentication and authorization.
+
+**Library:** `Microsoft.AspNetCore.Authentication.JwtBearer`
+
+The API uses the JWT Bearer scheme. Protected endpoints require a valid JWT and the `documents.read` scope.
+
+| Method | Endpoint | Auth | Description |
+| --- | --- | --- | --- |
+| `GET` | `/api/documents` | JWT Bearer + scope `documents.read` | Returns a success message when the token is valid and authorized |
+
+**Expected responses**
+
+- `200 OK` — valid JWT with scope `documents.read`
+- `401 Unauthorized` — missing, invalid, or expired token
+- `403 Forbidden` — valid JWT without the required scope
+
+Tokens were generated with `dotnet user-jwts`. Swagger UI is available at `/swagger` to paste the JWT and call the endpoint.
+
+### Evidence
+
+**1. Valid JWT — 200 OK**
+
+![Valid JWT — 200 OK](docs/evidence/01-valid-jwt-200.png)
+
+**2. Missing / invalid JWT — 401 Unauthorized**
+
+![Missing or invalid JWT — 401 Unauthorized](docs/evidence/02-invalid-jwt-401.png)
+
+**3. Valid JWT without scope — 403 Forbidden**
+
+![Valid JWT without scope — 403 Forbidden](docs/evidence/03-missing-scope-403.png)
+
